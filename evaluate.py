@@ -90,8 +90,8 @@ class CommandAugmentedWalker(gym.Wrapper):
 # 3. Best Model 시각화 전용 코드 (수정됨)
 # ---------------------------------------------
 def visualize_best_model(
-    model_path: str = "./walker2d_curriculum_logs/best_model/best_model.zip",
-    vec_normalize_path: str = "./walker2d_curriculum_logs/vec_normalize.pkl",
+    model_path: str = "./server/best_model/best_model.zip",
+    vec_normalize_path: str = "./server/vec_normalize.pkl",
     num_episodes: int = 5,
     render_mode: str = "human",
     deterministic: bool = True,
@@ -125,7 +125,7 @@ def visualize_best_model(
     # 환경 생성 (학습 환경과 동일하게 CommandAugmentedWalker로 래핑)
     # 테스트 시에는 최종 목표인 3.0 m/s를 최대 속도 범위로 설정합니다.
     vis_env = gym.make("Walker2d-v5", render_mode=render_mode)
-    vis_env = CommandAugmentedWalker(vis_env, init_command_high=3.0) 
+    vis_env = CommandAugmentedWalker(vis_env, init_command_high=2.0) 
     
     # 비디오 레코더 설정
     if save_video:
