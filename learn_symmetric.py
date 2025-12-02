@@ -31,8 +31,8 @@ class Config:
     knee_offset = -np.pi/2
     
     # 보상 가중치
-    lambda_vel_init = 0.01      
-    lambda_vel_final = 0.1       
+    lambda_vel_init = 0.05      
+    lambda_vel_final = 1.0       
     lambda_track_init = 0.0     
     lambda_track_final = 1.0   
     lambda_ctrl = 0.0005
