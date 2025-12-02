@@ -11,7 +11,7 @@ import os
 # ---------------------------------------------
 # 1. 설정 및 초기화
 # ---------------------------------------------
-log_dir = "./walker2d_speed_boost_logs/"
+log_dir = "./walker2d_speed_boost_logs2/"
 os.makedirs(log_dir, exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
