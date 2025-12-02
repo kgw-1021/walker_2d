@@ -185,7 +185,7 @@ if __name__ == "__main__":
         eval_env,
         best_model_save_path=log_dir + "best_model/",
         log_path=log_dir + "eval/",
-        eval_freq=10000,
+        eval_freq=2000,
         n_eval_episodes=5,
         deterministic=True,
         callback_on_new_best=save_norm_cb

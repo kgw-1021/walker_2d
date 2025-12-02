@@ -260,7 +260,7 @@ def analyze_long_run_speed(
         
         ax.set_xlabel('Step', fontsize=12)
         ax.set_ylabel('Velocity (m/s)', fontsize=12)
-        ax.set_title(f'속도 시계열 분석 ({total_steps:,} 스텝)', fontsize=14)
+        ax.set_title(f'Velocity Profiling ({total_steps:,} steps)', fontsize=14)
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
         
@@ -276,7 +276,7 @@ def analyze_long_run_speed(
         axes[0].axvline(np.mean(all_velocities), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(all_velocities):.2f}')
         axes[0].set_xlabel('Velocity (m/s)', fontsize=12)
         axes[0].set_ylabel('Frequency', fontsize=12)
-        axes[0].set_title('전체 속도 분포', fontsize=12)
+        axes[0].set_title('Velocity Histogram', fontsize=12)
         axes[0].legend()
         axes[0].grid(True, alpha=0.3, axis='y')
         
@@ -285,7 +285,7 @@ def analyze_long_run_speed(
                        label=f'Mean: {np.mean(post_warmup_velocities):.2f}')
         axes[1].set_xlabel('Velocity (m/s)', fontsize=12)
         axes[1].set_ylabel('Frequency', fontsize=12)
-        axes[1].set_title(f'워밍업 이후 속도 분포 (>{warmup_steps} steps)', fontsize=12)
+        axes[1].set_title(f'Velocity Histogram (>{warmup_steps} steps)', fontsize=12)
         axes[1].legend()
         axes[1].grid(True, alpha=0.3, axis='y')
         
@@ -320,7 +320,7 @@ def analyze_long_run_speed(
         
         ax.set_xlabel('Step Interval (k = 1000)', fontsize=12)
         ax.set_ylabel('Average Velocity (m/s)', fontsize=12)
-        ax.set_title('구간별 평균 속도', fontsize=14)
+        ax.set_title('Average Velocity by section', fontsize=14)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(intervals, rotation=45, ha='right')
         ax.axhline(y=post_warmup_mean, color='red', linestyle='--', linewidth=2, 
@@ -351,7 +351,7 @@ def analyze_long_run_speed(
         
         ax.set_xlabel('Step Interval (k = 1000)', fontsize=12)
         ax.set_ylabel('Velocity (m/s)', fontsize=12)
-        ax.set_title('구간별 속도 분포 (Box Plot)', fontsize=14)
+        ax.set_title('Velocity Distribution by section (Box Plot)', fontsize=14)
         ax.tick_params(axis='x', rotation=45)
         ax.grid(True, alpha=0.3, axis='y')
         
