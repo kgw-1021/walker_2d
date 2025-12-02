@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import os
 from typing import Optional
+from learn_SAC import CommandAugmentedWalker
 
 # ---------------------------------------------
 # 1. 환경 설정 및 장치 확인
@@ -18,73 +19,6 @@ os.environ['SDL_VIDEODRIVER'] = 'windows'
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"사용 디바이스: {device}")
 
-# ---------------------------------------------
-# 2. CommandAugmentedWalker (학습 때 사용한 환경 래퍼)
-# ---------------------------------------------
-# 이 클래스는 학습된 모델이 기대하는 18차원 관측값을 생성하기 위해 필수입니다.
-class CommandAugmentedWalker(gym.Wrapper):
-    """
-    관측(Observation)에 '목표 속도(Command)'를 추가하는 환경 래퍼.
-    """
-    def __init__(self, env, command_low=3.0, final_command_high=3.0, init_command_high=3.0):
-        super().__init__(env)
-        self.command_low = command_low
-        self.final_command_high = final_command_high
-        self.curr_max_speed = init_command_high # 테스트 시에는 최대 속도 범위(3.0)로 설정
-        self.current_command = 0.0
-        
-        # 관측 공간 확장: 기존 Obs + Command(1)
-        low = self.env.observation_space.low
-        high = self.env.observation_space.high
-        new_low = np.concatenate([low, np.array([command_low], dtype=np.float32)])
-        new_high = np.concatenate([high, np.array([final_command_high], dtype=np.float32)])
-        self.observation_space = spaces.Box(low=new_low, high=new_high, dtype=np.float32)
-
-    def set_max_speed(self, speed):
-        """커리큘럼 학습 중 사용되는 함수 (테스트 시에는 주로 사용 안함)"""
-        self.curr_max_speed = min(speed, self.final_command_high)
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        
-        # 테스트 시에는 최대 난이도(3.0) 내에서 랜덤 목표 속도 설정
-        self.current_command = np.random.uniform(self.command_low, self.curr_max_speed)
-        
-        # 관측값에 Command 추가 (모델이 기대하는 18차원 생성)
-        obs_aug = np.concatenate([obs, np.array([self.current_command], dtype=np.float32)])
-        
-        # 정보용 dict에 목표 속도 기록
-        info["target_velocity"] = self.current_command
-        return obs_aug, info
-
-    def step(self, action):
-        obs, _, terminated, truncated, info = self.env.step(action)
-        
-        # *주의*: 테스트 시각화 코드에서는 보상 함수가 중요하지 않으므로, 
-        # 학습 시 사용했던 복잡한 커스텀 보상 대신, 
-        # 관측값 확장과 정보 추출만 수행하여 모델이 기대하는 형식을 유지합니다.
-        
-        x_vel = info.get('x_velocity', 0)
-        target_vel = self.current_command
-        
-        # (테스트를 위해 단순화된 보상 로직을 적용하거나, 복잡한 로직을 가져올 수 있습니다.)
-        # 여기서는 모델이 학습된 방식대로 CommandAugmentedWalker의 로직을 따라갑니다.
-        velocity_error = np.abs(target_vel - x_vel)
-        tracking_reward = -2.0 * velocity_error
-        achievement_bonus = 1.5 if velocity_error < 0.3 else 0.0
-        survival_reward = 0.05
-        ctrl_cost = -0.001 * np.sum(np.square(action))
-        
-        # 최종 보상은 기록용
-        custom_reward = tracking_reward + achievement_bonus + survival_reward + ctrl_cost
-
-        # 관측값에 Command 추가 (모델이 기대하는 18차원 생성)
-        obs_aug = np.concatenate([obs, np.array([self.current_command], dtype=np.float32)])
-        
-        info["target_velocity"] = target_vel
-        info["x_velocity"] = x_vel # 속도 정보 추가
-        
-        return obs_aug, custom_reward, terminated, truncated, info
 
 # ---------------------------------------------
 # 3. Best Model 시각화 전용 코드 (수정됨)
@@ -125,7 +59,7 @@ def visualize_best_model(
     # 환경 생성 (학습 환경과 동일하게 CommandAugmentedWalker로 래핑)
     # 테스트 시에는 최종 목표인 3.0 m/s를 최대 속도 범위로 설정합니다.
     vis_env = gym.make("Walker2d-v5", render_mode=render_mode)
-    vis_env = CommandAugmentedWalker(vis_env, init_command_high=2.0) 
+    vis_env = CommandAugmentedWalker(vis_env, command_low=1.0, init_command_high=1.0) 
     
     # 비디오 레코더 설정
     if save_video:
@@ -151,7 +85,7 @@ def visualize_best_model(
         
         # VecNormalize 로딩을 위해서는 DummyVecEnv가 필요합니다.
         # 로드된 객체에서 통계만 가져와 수동 정규화에 사용합니다.
-        temp_env = DummyVecEnv([lambda: gym.make("Walker2d-v5")]) 
+        temp_env = DummyVecEnv([lambda: CommandAugmentedWalker(gym.make("Walker2d-v5"), init_command_high=0.5)]) 
         vec_norm = VecNormalize.load(vec_normalize_path, temp_env)
         
         obs_mean = vec_norm.obs_rms.mean
@@ -235,7 +169,7 @@ if __name__ == '__main__':
     
     # 학습 시 log_dir이 './walker2d_curriculum_logs/'로 설정되었음을 가정
     visualize_best_model(
-        model_path="./walker2d_curriculum_logs/best_model/best_model.zip",
+        model_path="./walker2d_curriculum_logs/low_level_curriculum_final.zip",
         vec_normalize_path="./walker2d_curriculum_logs/vec_normalize.pkl",
         num_episodes=3,
         save_video=True,
