@@ -14,13 +14,15 @@ from stable_baselines3.common.utils import set_random_seed
 # ==================== 1. 설정 (Config) ====================
 class Config:
     env_name = "Walker2d-v5"
-    total_timesteps = 2_000_000
+    total_timesteps = 1_500_000
     
     # 병렬 처리 설정
     n_envs = 8  # 병렬 환경 개수 (CPU 코어 수에 맞춰 조정)
     
     # 위상 및 궤적 파라미터
     T_stride = 0.7
+    L_stride = 0.8
+    x_vel_min = 0.1
     hip_amplitude = 0.25
     hip_center = 0.0
     hip_offset = 0.0
@@ -29,15 +31,15 @@ class Config:
     knee_offset = -np.pi/2
     
     # 보상 가중치
-    lambda_vel_init = 0.05      
-    lambda_vel_final = 1.0       
+    lambda_vel_init = 0.01      
+    lambda_vel_final = 0.1       
     lambda_track_init = 0.0     
     lambda_track_final = 1.0   
     lambda_ctrl = 0.0005
     
     # 커리큘럼 설정
-    curriculum_vel_steps = 700_000  # 70만 스텝 동안 속도 학습
-    curriculum_track_steps = 1_400_000 # 70만 스텝부터 140만 스텝까지 궤적 추종 학습
+    curriculum_vel_steps = 600_000  
+    curriculum_track_steps = 1_200_000 
     
     # 경로 설정
     log_dir = "./walker_phase_sac_logs/"
@@ -92,9 +94,14 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         
     def step(self, action):
         obs, custom_reward, terminated, truncated, info = self.env.step(action)
-        
+        x_vel = info.get('x_velocity', self.env.unwrapped.data.qvel[0])
+
+        adaptive_vel = np.maximum(np.abs(x_vel), self.cfg.x_vel_min)
+
+        delta_phi = (self.dt * adaptive_vel) / self.cfg.L_stride
+
         self.time += self.dt
-        self.phase = (self.time / self.cfg.T_stride) % 1.0
+        self.phase = (self.phase + delta_phi) % 1.0
         
         aug_obs = self._augment_observation(obs)
         custom_reward, tracking_error_L1 = self._compute_reward(action, info)
