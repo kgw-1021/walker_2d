@@ -197,7 +197,7 @@ if __name__ == "__main__":
     # 학습 시작
     print("학습을 시작합니다...")
     model.learn(
-        total_timesteps=2000000,
+        total_timesteps=5000000,
         callback=[speed_monitor, eval_callback],
         progress_bar=True
     )

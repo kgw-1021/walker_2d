@@ -14,7 +14,7 @@ from stable_baselines3.common.utils import set_random_seed
 # ==================== 1. 설정 (Config) ====================
 class Config:
     env_name = "Walker2d-v5"
-    total_timesteps = 1_000_000
+    total_timesteps = 2_000_000
     
     # 병렬 처리 설정
     n_envs = 8  # 병렬 환경 개수 (CPU 코어 수에 맞춰 조정)
@@ -29,13 +29,15 @@ class Config:
     knee_offset = -np.pi/2
     
     # 보상 가중치
-    lambda_vel_init = 0.1
-    lambda_vel_final = 1.0
-    lambda_track = 2.0
-    lambda_ctrl = 0.001
+    lambda_vel_init = 0.05      
+    lambda_vel_final = 1.0       
+    lambda_track_init = 0.0     
+    lambda_track_final = 1.0   
+    lambda_ctrl = 0.0005
     
     # 커리큘럼 설정
-    curriculum_timesteps = 500_000
+    curriculum_vel_steps = 700_000  # 70만 스텝 동안 속도 학습
+    curriculum_track_steps = 1_400_000 # 70만 스텝부터 140만 스텝까지 궤적 추종 학습
     
     # 경로 설정
     log_dir = "./walker_phase_sac_logs/"
@@ -73,6 +75,7 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         self.time = 0.0
         self.dt = 0.008
         self.current_vel_weight = self.cfg.lambda_vel_init
+        self.current_track_weight = self.cfg.lambda_track_init 
         
         # Observation Space 확장 (기존 + sin + cos + 4 errors)
         base_dim = self.env.observation_space.shape[0]
@@ -88,16 +91,16 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         return self._augment_observation(obs), info
         
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs, custom_reward, terminated, truncated, info = self.env.step(action)
         
         self.time += self.dt
         self.phase = (self.time / self.cfg.T_stride) % 1.0
         
         aug_obs = self._augment_observation(obs)
-        custom_reward, tracking_error = self._compute_reward(action, info)
+        custom_reward, tracking_error_L1 = self._compute_reward(action, info)
         
         # 모니터링을 위해 info에 기록
-        info['tracking_error'] = tracking_error
+        info['tracking_error_L1'] = tracking_error_L1
         info['phase'] = self.phase
         info['vel_weight'] = self.current_vel_weight
         
@@ -126,21 +129,24 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         curr = {name: qpos[idx] for name, idx in self.joint_indices.items()}
         targ = self.traj_gen.get_target_angles(self.phase)
         
-        tracking_error_sq = sum([(curr[k] - targ[k])**2 for k in self.joint_indices])
+        tracking_error_L1 = sum([abs(curr[k] - targ[k]) for k in self.joint_indices])
         control_cost = np.sum(np.square(action))
         
-        healthy_reward = 1.0
+        healthy_reward = 5.0
         
         reward = (
             self.current_vel_weight * x_vel
             + healthy_reward
-            - self.cfg.lambda_track * tracking_error_sq
+            - self.current_track_weight * tracking_error_L1 # L1 Norm 적용
             - self.cfg.lambda_ctrl * control_cost
         )
-        return reward, tracking_error_sq
+        return reward, tracking_error_L1
     
     def set_velocity_weight(self, weight):
         self.current_vel_weight = weight
+
+    def set_tracking_weight(self, weight):
+        self.current_track_weight = weight
 
 # ==================== 4. 유용한 콜백들 ====================
 
@@ -167,10 +173,16 @@ class CurriculumAndMonitorCallback(BaseCallback):
     
     def _on_step(self) -> bool:
         # 1. 커리큘럼 업데이트
-        progress = min(self.num_timesteps / self.cfg.curriculum_timesteps, 1.0)
-        new_weight = self.cfg.lambda_vel_init + progress * (self.cfg.lambda_vel_final - self.cfg.lambda_vel_init)
-        self.training_env.env_method("set_velocity_weight", new_weight)
+        progress_vel = min(self.num_timesteps / self.cfg.curriculum_vel_steps, 1.0)
+        new_vel_weight = self.cfg.lambda_vel_init + progress_vel * (self.cfg.lambda_vel_final - self.cfg.lambda_vel_init)
         
+        progress_track = max(0.0, (self.num_timesteps - self.cfg.curriculum_vel_steps) / (self.cfg.curriculum_track_steps - self.cfg.curriculum_vel_steps))
+        progress_track = min(progress_track, 1.0)
+
+        new_track_weight = self.cfg.lambda_track_init + progress_track * (self.cfg.lambda_track_final - self.cfg.lambda_track_init)
+
+        self.training_env.env_method("set_velocity_weight", new_vel_weight)
+        self.training_env.env_method("set_tracking_weight", new_track_weight) # 새 함수 호출
         # 2. 로깅 (Tracking Error 등)
         infos = self.locals.get("infos", [])
         for info in infos:
@@ -178,7 +190,8 @@ class CurriculumAndMonitorCallback(BaseCallback):
                 self.tracking_errors.append(info['tracking_error'])
                 
         # Tensorboard 기록
-        self.logger.record("curriculum/velocity_weight", new_weight)
+        self.logger.record("curriculum/velocity_weight", new_vel_weight)
+        self.logger.record("curriculum/tracking_weight", new_track_weight) # 새 로그 추가
         
         if len(self.tracking_errors) > 0 and self.n_calls % 1000 == 0:
             mean_error = np.mean(self.tracking_errors)
