@@ -9,6 +9,7 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 from stable_baselines3.common.utils import set_random_seed
+from stable_baselines3.common.monitor import Monitor
 
 # ==================== 1. 설정 (Config) ====================
 class Config:
@@ -39,9 +40,9 @@ class Config:
     
     # 보상 가중치
     lambda_vel_init = 0.1      
-    lambda_vel_final = 3.0       # 속도 보상을 강화 (잘 걷는게 최우선)
+    lambda_vel_final = 1.0       # 속도 보상을 강화 (잘 걷는게 최우선)
     lambda_track_init = 0.0     
-    lambda_track_final = 0.5     # 궤적은 가이드라인으로만 사용 (너무 강하면 넘어짐)
+    lambda_track_final = 0.7     # 궤적은 가이드라인으로만 사용 (너무 강하면 넘어짐)
     lambda_ctrl = 0.001
     
     # 커리큘럼 설정
@@ -341,6 +342,7 @@ def make_env(rank, seed=0):
     def _init():
         env = gym.make(Config.env_name)
         env = PhaseAugmentedWrapper(env, Config())
+        env = Monitor(env)
         env.reset(seed=seed + rank)
         return env
     return _init
