@@ -271,7 +271,7 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         control_cost = np.sum(np.square(action))
         
         # 넘어지지 않고 살아있으면 주는 보상
-        healthy_reward = 1.0
+        healthy_reward = 3.0
         
         reward = (
             self.current_vel_weight * x_vel
