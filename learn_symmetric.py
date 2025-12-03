@@ -14,7 +14,7 @@ from stable_baselines3.common.utils import set_random_seed
 # ==================== 1. 설정 (Config) ====================
 class Config:
     env_name = "Walker2d-v5"
-    total_timesteps = 2_000_000
+    total_timesteps = 3_000_000
     
     # 병렬 처리 설정
     n_envs = 8
@@ -40,7 +40,7 @@ class Config:
     lambda_vel_init = 0.1      
     lambda_vel_final = 1.0       
     lambda_track_init = 0.0     
-    lambda_track_final = 0.7     
+    lambda_track_final = 0.5     
     lambda_ctrl = 0.001
     
     # 커리큘럼 설정
