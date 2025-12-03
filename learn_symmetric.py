@@ -8,8 +8,8 @@ from gymnasium import spaces
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.monitor import Monitor  # [추가] 모니터 래퍼
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.monitor import Monitor
 
 # ==================== 1. 설정 (Config) ====================
 class Config:
@@ -20,29 +20,27 @@ class Config:
     n_envs = 8
     
     # 위상 및 궤적 파라미터 (적응형)
-    stride_length_base = 0.5    # 보폭을 조금 더 넓게 (m)
+    stride_length_base = 0.5    # 기본 보폭 (m)
     stride_length_coef = 0.2    # 속도 계수
-    stride_time_base = 1.0      # 주기를 조금 더 여유 있게 (s)
+    stride_time_base = 1.0      # 기본 주기 (s)
     stride_time_coef = -0.1     # 속도 계수
     x_vel_min = 0.1             # 최소 속도
     
     # 궤적 파라미터 (MuJoCo Walker2d 관절 범위 고려)
-    # Hip: 앞뒤로 스윙 (양수/음수)
     hip_amplitude = 0.8
     hip_center = 0.0
     hip_offset = 0.0
     
-    # Knee: Walker2d는 0(폄) ~ -150(굽힘)도 범위입니다.
-    # 따라서 중심을 음수로, 궤적이 0을 넘지 않도록 설정해야 합니다.
+    # Knee: Walker2d는 0(폄) ~ -150(굽힘)도 범위
     knee_amplitude = 0.7
-    knee_center = -1.0          # 음수 중심 (굽혀진 상태가 기본)
-    knee_offset = -np.pi/2      # 엉덩이보다 반박자 늦게 움직임
+    knee_center = -1.0          # 음수 중심
+    knee_offset = -np.pi/2      
     
     # 보상 가중치
     lambda_vel_init = 0.1      
-    lambda_vel_final = 1.0       # 속도 보상을 강화 (잘 걷는게 최우선)
+    lambda_vel_final = 3.0       
     lambda_track_init = 0.0     
-    lambda_track_final = 0.7     # 궤적은 가이드라인으로만 사용 (너무 강하면 넘어짐)
+    lambda_track_final = 0.5     
     lambda_ctrl = 0.001
     
     # 커리큘럼 설정
@@ -51,7 +49,7 @@ class Config:
     
     # DUP (Mirror Augmentation) 설정
     enable_mirror_augmentation = True
-    mirror_probability = 0.5  # 50% 확률로 mirrored 데이터 사용
+    mirror_probability = 0.5
     
     # 경로 설정
     log_dir = "./walker_phase_sac_logs/"
@@ -60,88 +58,43 @@ os.makedirs(Config.log_dir, exist_ok=True)
 
 # ==================== 2. Mirror 함수 (DUP 구현) ====================
 class MirrorAugmentation:
-    """
-    Walker2D-v5의 좌우 대칭 변환 (Gym Standard: Right first, then Left)
-    
-    관측 구조 (17차원):
-    [0]: root_z (높이)
-    [1]: root_angle (각도) -> 반전 대상
-    [2-4]: Right Leg (thigh, leg, foot)
-    [5-7]: Left Leg (thigh, leg, foot)
-    [8]: root_vx (전방 속도)
-    [9]: root_vz (수직 속도)
-    [10]: root_ang_vel (각속도) -> 반전 대상
-    [11-13]: Right Leg Vel
-    [14-16]: Left Leg Vel
-    """
-    
     @staticmethod
     def mirror_obs(obs):
-        """
-        Walker2D 관측을 좌우 반전
-        """
         mirrored = obs.copy()
-        
         # 1. Root Angle (Pitch) 반전
         mirrored[1] = -obs[1]
-        
         # 2. 관절 각도 Swap (Right <-> Left)
-        # Right(2,3,4) <-> Left(5,6,7)
         mirrored[2:5] = obs[5:8]
         mirrored[5:8] = obs[2:5]
-        
         # 3. Root Angular Velocity 반전
         mirrored[10] = -obs[10]
-        
-        # 4. 각속도 Swap (Right <-> Left)
-        # Right Vel(11,12,13) <-> Left Vel(14,15,16)
+        # 4. 각속도 Swap
         mirrored[11:14] = obs[14:17]
         mirrored[14:17] = obs[11:14]
-        
         return mirrored
     
     @staticmethod
     def mirror_action(action):
-        """
-        Walker2D 행동을 좌우 반전
-        Action 구조: [Right_Hip, Right_Knee, Right_Foot, Left_Hip, Left_Knee, Left_Foot]
-        """
         mirrored = action.copy()
-        
-        # Right(0-2) <-> Left(3-5) Swap
         mirrored[0:3] = action[3:6]
         mirrored[3:6] = action[0:3]
-        
         return mirrored
     
     @staticmethod
     def mirror_obs_augmented(aug_obs):
-        """
-        확장된 관측 반전
-        구조: [base_obs(17), sin(φ), cos(φ), tracking_errors(4)]
-        """
         mirrored = aug_obs.copy()
-        
-        # Base observation 반전
         mirrored[:17] = MirrorAugmentation.mirror_obs(aug_obs[:17])
-        
-        # Phase encoding (sin, cos) 유지 (위상은 전역적이므로 변환 불필요)
-        
-        # Tracking errors swap (Right <-> Left)
-        # 순서: [R_hip_err, R_knee_err, L_hip_err, L_knee_err]
-        mirrored[19:21] = aug_obs[21:23]  # R <- L
-        mirrored[21:23] = aug_obs[19:21]  # L <- R
-        
+        # Tracking errors swap
+        mirrored[19:21] = aug_obs[21:23]
+        mirrored[21:23] = aug_obs[19:21]
         return mirrored
 
-# ==================== 3. 목표 궤적 생성기 (수정됨) ====================
+# ==================== 3. 목표 궤적 생성기 ====================
 class TrajectoryGenerator:
     def __init__(self, config):
         self.cfg = config
     
     def get_target_angles(self, phase):
-        # Walker2d-v5는 Right Leg가 먼저입니다.
-        
         # Right Leg (Base Phase)
         right_hip = self.cfg.hip_amplitude * np.sin(2 * np.pi * phase + self.cfg.hip_offset) + self.cfg.hip_center
         right_knee = self.cfg.knee_amplitude * np.sin(2 * np.pi * phase + self.cfg.knee_offset) + self.cfg.knee_center
@@ -151,7 +104,7 @@ class TrajectoryGenerator:
         left_hip = self.cfg.hip_amplitude * np.sin(2 * np.pi * left_phase + self.cfg.hip_offset) + self.cfg.hip_center
         left_knee = self.cfg.knee_amplitude * np.sin(2 * np.pi * left_phase + self.cfg.knee_offset) + self.cfg.knee_center
         
-        # 물리적 제약: 무릎이 0보다 커지면(역관절) 안됨
+        # 물리적 제약
         right_knee = np.minimum(right_knee, 0.0)
         left_knee = np.minimum(left_knee, 0.0)
         
@@ -160,17 +113,14 @@ class TrajectoryGenerator:
             'left_hip': left_hip, 'left_knee': left_knee
         }
 
-# ==================== 4. 환경 래퍼 (DUP 통합) ====================
+# ==================== 4. 환경 래퍼 ====================
 class PhaseAugmentedWrapper(gym.Wrapper):
     def __init__(self, env, config):
         super().__init__(env)
         self.cfg = config
         self.traj_gen = TrajectoryGenerator(config)
         
-        # MuJoCo qpos 인덱스 매핑 (XML 구조 기준)
-        # 0:rootx, 1:rootz, 2:rooty(angle), 
-        # 3:right_hip, 4:right_knee, 5:right_foot
-        # 6:left_hip, 7:left_knee, 8:left_foot
+        # MuJoCo qpos 인덱스
         self.joint_indices = {
             'right_hip': 3, 'right_knee': 4, 
             'left_hip': 6, 'left_knee': 7
@@ -181,10 +131,8 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         self.dt = 0.008
         self.current_vel_weight = self.cfg.lambda_vel_init
         self.current_track_weight = self.cfg.lambda_track_init
-        
         self.use_mirror = False
         
-        # Observation Space 확장 (기존 17 + sin + cos + 4 errors = 23)
         base_dim = self.env.observation_space.shape[0]
         new_dim = base_dim + 6
         self.observation_space = spaces.Box(
@@ -193,11 +141,9 @@ class PhaseAugmentedWrapper(gym.Wrapper):
     
     def _get_adaptive_stride_params(self, velocity):
         v = np.clip(abs(velocity), self.cfg.x_vel_min, 3.0)
-        
         stride_length = self.cfg.stride_length_base + self.cfg.stride_length_coef * v
         stride_time = self.cfg.stride_time_base + self.cfg.stride_time_coef * v
-        
-        stride_time = max(stride_time, 0.3) # 최소 주기 제한
+        stride_time = max(stride_time, 0.3)
         return stride_length, stride_time
         
     def reset(self, **kwargs):
@@ -211,10 +157,8 @@ class PhaseAugmentedWrapper(gym.Wrapper):
             self.use_mirror = False
         
         aug_obs = self._augment_observation(obs)
-        
         if self.use_mirror:
             aug_obs = MirrorAugmentation.mirror_obs_augmented(aug_obs)
-        
         return aug_obs, info
         
     def step(self, action):
@@ -225,7 +169,9 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(actual_action)
         x_vel = info.get('x_velocity', self.env.unwrapped.data.qvel[0])
 
+        # 보행 분석 파라미터 계산
         stride_length, stride_time = self._get_adaptive_stride_params(x_vel)
+        cadence = 60.0 / stride_time if stride_time > 0 else 0.0
         
         self.time += self.dt
         delta_phi = self.dt / stride_time
@@ -237,42 +183,39 @@ class PhaseAugmentedWrapper(gym.Wrapper):
         if self.use_mirror:
             aug_obs = MirrorAugmentation.mirror_obs_augmented(aug_obs)
         
+        # [수정] 분석 정보를 info에 담기 (TensorBoard 기록용)
         info['tracking_error_L1'] = tracking_error_L1
+        info['stride_length'] = stride_length
+        info['stride_time'] = stride_time
+        info['cadence'] = cadence
         info['phase'] = self.phase
-        info['vel_weight'] = self.current_vel_weight
         info['is_mirrored'] = self.use_mirror
         
         return aug_obs, custom_reward, terminated, truncated, info
     
     def _augment_observation(self, base_obs):
         phase_enc = np.array([np.sin(2*np.pi*self.phase), np.cos(2*np.pi*self.phase)])
-        
         qpos = self.env.unwrapped.data.qpos
         curr = {name: qpos[idx] for name, idx in self.joint_indices.items()}
         targ = self.traj_gen.get_target_angles(self.phase)
         
-        # 순서: R_hip, R_knee, L_hip, L_knee
         errors = np.array([
             curr['right_hip'] - targ['right_hip'],
             curr['right_knee'] - targ['right_knee'],
             curr['left_hip'] - targ['left_hip'],
             curr['left_knee'] - targ['left_knee']
         ])
-        
         return np.concatenate([base_obs, phase_enc, errors]).astype(np.float32)
 
     def _compute_reward(self, action, info):
         x_vel = info.get('x_velocity', self.env.unwrapped.data.qvel[0])
-        
         qpos = self.env.unwrapped.data.qpos
         curr = {name: qpos[idx] for name, idx in self.joint_indices.items()}
         targ = self.traj_gen.get_target_angles(self.phase)
         
         tracking_error_L1 = sum([abs(curr[k] - targ[k]) for k in self.joint_indices])
         control_cost = np.sum(np.square(action))
-        
-        # 넘어지지 않고 살아있으면 주는 보상
-        healthy_reward = 3.0
+        healthy_reward = 5.0
         
         reward = (
             self.current_vel_weight * x_vel
@@ -288,7 +231,7 @@ class PhaseAugmentedWrapper(gym.Wrapper):
     def set_tracking_weight(self, weight):
         self.current_track_weight = weight
 
-# ==================== 5. 콜백들 ====================
+# ==================== 5. 콜백들 (분석 기능 복구) ====================
 
 class SaveVecNormalizeCallback(BaseCallback):
     def __init__(self, vec_normalize_env, save_path):
@@ -304,8 +247,11 @@ class CurriculumAndMonitorCallback(BaseCallback):
     def __init__(self, config, verbose=0):
         super().__init__(verbose)
         self.cfg = config
+        # 로깅을 위한 버퍼
         self.tracking_errors = []
-        self.mirror_episodes = []
+        self.stride_lengths = []
+        self.stride_times = []
+        self.cadences = []
     
     def _on_step(self) -> bool:
         # 커리큘럼 업데이트
@@ -319,21 +265,37 @@ class CurriculumAndMonitorCallback(BaseCallback):
         self.training_env.env_method("set_velocity_weight", new_vel_weight)
         self.training_env.env_method("set_tracking_weight", new_track_weight)
         
-        # 로깅
+        # 정보 수집
         infos = self.locals.get("infos", [])
         for info in infos:
             if 'tracking_error_L1' in info:
                 self.tracking_errors.append(info['tracking_error_L1'])
-            if 'is_mirrored' in info:
-                self.mirror_episodes.append(1 if info['is_mirrored'] else 0)
-                
+            # [추가] 보행 분석 데이터 수집
+            if 'stride_length' in info:
+                self.stride_lengths.append(info['stride_length'])
+            if 'stride_time' in info:
+                self.stride_times.append(info['stride_time'])
+            if 'cadence' in info:
+                self.cadences.append(info['cadence'])
+
         self.logger.record("curriculum/velocity_weight", new_vel_weight)
         self.logger.record("curriculum/tracking_weight", new_track_weight)
         
+        # 주기적 로깅 (1000 스텝마다 평균값 기록)
         if len(self.tracking_errors) > 0 and self.n_calls % 1000 == 0:
-            mean_error = np.mean(self.tracking_errors)
-            self.logger.record("train/tracking_error_mean", mean_error)
+            self.logger.record("train/tracking_error_mean", np.mean(self.tracking_errors))
+            
+            # [추가] 보행 분석 그래프 기록
+            if len(self.stride_lengths) > 0:
+                self.logger.record("gait_analysis/stride_length", np.mean(self.stride_lengths))
+                self.logger.record("gait_analysis/stride_time", np.mean(self.stride_times))
+                self.logger.record("gait_analysis/cadence", np.mean(self.cadences))
+            
+            # 버퍼 초기화
             self.tracking_errors = []
+            self.stride_lengths = []
+            self.stride_times = []
+            self.cadences = []
             
         return True
 
@@ -342,16 +304,17 @@ def make_env(rank, seed=0):
     def _init():
         env = gym.make(Config.env_name)
         env = PhaseAugmentedWrapper(env, Config())
+        # [수정] Monitor 추가 (경고 해결 및 원본 점수 로깅)
         env = Monitor(env)
         env.reset(seed=seed + rank)
         return env
     return _init
 
 if __name__ == "__main__":
-    print(f"🚀 학습 시작: {Config.env_name}")
+    print(f" 학습 시작: {Config.env_name}")
     print(f"병렬 환경: {Config.n_envs}개")
-    print(f"✨ DUP Mode: {'ON' if Config.enable_mirror_augmentation else 'OFF'}")
-    print(f"🦵 Knee Trajectory: Center={Config.knee_center}, Amp={Config.knee_amplitude} (Negative Flexion)")
+    print(f" DUP Mode: {'ON' if Config.enable_mirror_augmentation else 'OFF'}")
+    print(f" Gait Analysis: Stride, Cadence Logging ON")
     
     # 1. 학습 환경
     train_env = SubprocVecEnv([make_env(i) for i in range(Config.n_envs)])
@@ -407,7 +370,6 @@ if __name__ == "__main__":
     # ==================== 7. 테스트 (시각화) ====================
     print("\n 최종 모델 테스트 시작...")
     
-    # 렌더링 모드 활성화
     test_env = DummyVecEnv([lambda: PhaseAugmentedWrapper(gym.make(Config.env_name, render_mode="human"), Config())])
     
     stats_path = os.path.join(Config.log_dir, "vec_normalize.pkl")
@@ -427,6 +389,3 @@ if __name__ == "__main__":
     for _ in range(3000):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, done, info = test_env.step(action)
-        # DummyVecEnv는 자동으로 reset을 호출하므로 별도 처리 불필요
-    
-    test_env.close()
