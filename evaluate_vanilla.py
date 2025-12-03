@@ -96,7 +96,9 @@ def analyze_long_run_speed(
     warmup_steps: int = 500,
     save_plots: bool = True,
     plot_folder: str = "./speed_analysis/",
-    render: bool = False
+    render: bool = False,
+    save_video: bool = False,
+    video_folder: str = "./walker2d_long_videos/"
 ):
     """
     50,000 스텝 동안 실행하면서 속도를 추적하고 분석합니다.
@@ -109,6 +111,8 @@ def analyze_long_run_speed(
         save_plots: 플롯 저장 여부
         plot_folder: 플롯 저장 폴더
         render: 렌더링 여부
+        save_video: 비디오 저장 여부
+        video_folder: 비디오 저장 폴더
     """
     
     print("\n" + "="*70)
@@ -124,9 +128,26 @@ def analyze_long_run_speed(
     if save_plots:
         os.makedirs(plot_folder, exist_ok=True)
     
+    # 비디오 폴더 생성
+    if save_video:
+        os.makedirs(video_folder, exist_ok=True)
+        render = False  # 비디오 저장 시 human 렌더링 비활성화
+    
     # 환경 생성
-    render_mode = "human" if render else None
+    render_mode = "human" if render else ("rgb_array" if save_video else None)
     env = gym.make("Walker2d-v5", render_mode=render_mode)
+    
+    # 비디오 레코더 래퍼 추가
+    if save_video:
+        from gymnasium.wrappers import RecordVideo
+        env = RecordVideo(
+            env,
+            video_folder=video_folder,
+            episode_trigger=lambda x: True,  # 모든 에피소드 녹화
+            name_prefix="walker2d_long_run"
+        )
+        print(f"✓ 비디오 저장 설정: {video_folder}")
+    
     env = Monitor(env)
     
     # 모델 로드
@@ -199,6 +220,9 @@ def analyze_long_run_speed(
     
     env.close()
     
+    if save_video:
+        print(f"\n✓ 비디오가 저장되었습니다: {video_folder}")
+    
     # ---------------------------------------------
     # 통계 분석
     # ---------------------------------------------
@@ -260,7 +284,7 @@ def analyze_long_run_speed(
         
         ax.set_xlabel('Step', fontsize=12)
         ax.set_ylabel('Velocity (m/s)', fontsize=12)
-        ax.set_title(f'Velocity Profiling ({total_steps:,} steps)', fontsize=14)
+        ax.set_title(f'속도 시계열 분석 ({total_steps:,} 스텝)', fontsize=14)
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
         
@@ -276,7 +300,7 @@ def analyze_long_run_speed(
         axes[0].axvline(np.mean(all_velocities), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(all_velocities):.2f}')
         axes[0].set_xlabel('Velocity (m/s)', fontsize=12)
         axes[0].set_ylabel('Frequency', fontsize=12)
-        axes[0].set_title('Velocity Histogram', fontsize=12)
+        axes[0].set_title('전체 속도 분포', fontsize=12)
         axes[0].legend()
         axes[0].grid(True, alpha=0.3, axis='y')
         
@@ -285,7 +309,7 @@ def analyze_long_run_speed(
                        label=f'Mean: {np.mean(post_warmup_velocities):.2f}')
         axes[1].set_xlabel('Velocity (m/s)', fontsize=12)
         axes[1].set_ylabel('Frequency', fontsize=12)
-        axes[1].set_title(f'Velocity Histogram (>{warmup_steps} steps)', fontsize=12)
+        axes[1].set_title(f'워밍업 이후 속도 분포 (>{warmup_steps} steps)', fontsize=12)
         axes[1].legend()
         axes[1].grid(True, alpha=0.3, axis='y')
         
@@ -320,7 +344,7 @@ def analyze_long_run_speed(
         
         ax.set_xlabel('Step Interval (k = 1000)', fontsize=12)
         ax.set_ylabel('Average Velocity (m/s)', fontsize=12)
-        ax.set_title('Average Velocity by section', fontsize=14)
+        ax.set_title('구간별 평균 속도', fontsize=14)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(intervals, rotation=45, ha='right')
         ax.axhline(y=post_warmup_mean, color='red', linestyle='--', linewidth=2, 
@@ -351,7 +375,7 @@ def analyze_long_run_speed(
         
         ax.set_xlabel('Step Interval (k = 1000)', fontsize=12)
         ax.set_ylabel('Velocity (m/s)', fontsize=12)
-        ax.set_title('Velocity Distribution by section (Box Plot)', fontsize=14)
+        ax.set_title('구간별 속도 분포 (Box Plot)', fontsize=14)
         ax.tick_params(axis='x', rotation=45)
         ax.grid(True, alpha=0.3, axis='y')
         
@@ -523,6 +547,10 @@ if __name__ == '__main__':
                        help='분석 플롯 저장 폴더')
     parser.add_argument('--render', action='store_true',
                        help='렌더링 활성화')
+    parser.add_argument('--video', action='store_true',
+                       help='비디오 저장 활성화')
+    parser.add_argument('--video-folder', type=str, default='./walker2d_videos_boost2/',
+                       help='비디오 저장 폴더')
     
     args = parser.parse_args()
     
@@ -535,7 +563,9 @@ if __name__ == '__main__':
             warmup_steps=args.warmup,
             save_plots=True,
             plot_folder=args.plot_folder,
-            render=args.render
+            render=args.render,
+            save_video=args.video,
+            video_folder=args.video_folder
         )
     else:  # reward
         # 보상 분석 실행
