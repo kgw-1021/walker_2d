@@ -38,9 +38,9 @@ class Config:
     
     # 보상 가중치
     lambda_vel_init = 0.1      
-    lambda_vel_final = 3.0       
+    lambda_vel_final = 1.0       
     lambda_track_init = 0.0     
-    lambda_track_final = 0.5     
+    lambda_track_final = 0.7     
     lambda_ctrl = 0.001
     
     # 커리큘럼 설정
