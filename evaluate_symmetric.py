@@ -151,10 +151,10 @@ def make_eval_env(config, render_mode=None):
 
 def evaluate_and_report(config):
     # 1. 모델 및 통계 경로 설정
-    # stats_path = os.path.join(config.log_dir, "vec_normalize.pkl")
-    # model_path = os.path.join(config.log_dir, "best_model", "best_model.zip")
-    stats_path = os.path.join(config.log_dir, "vec_normalize_final.pkl")
-    model_path = os.path.join(config.log_dir, "final_model.zip")
+    stats_path = os.path.join(config.log_dir, "vec_normalize.pkl")
+    model_path = os.path.join(config.log_dir, "best_model", "best_model.zip")
+    # stats_path = os.path.join(config.log_dir, "vec_normalize_final.pkl")
+    # model_path = os.path.join(config.log_dir, "final_model.zip")
     
     if not os.path.exists(model_path) or not os.path.exists(stats_path):
         print(" 오류: 학습된 모델 파일 또는 VecNormalize 통계 파일을 찾을 수 없습니다.")
@@ -216,6 +216,7 @@ def evaluate_and_report(config):
             all_tracking_errors.append(avg_tracking_error)
             
             print(f"  [EP {episode+1:2d}] 총 보상: {episode_reward:.2f}, 평균 속도: {avg_velocity:.2f} m/s, ACTE: {avg_tracking_error:.4f}")
+        eval_env.close()
 
     # 5. 최종 결과 보고
     if len(all_rewards) > 0:
