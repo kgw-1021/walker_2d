@@ -14,7 +14,7 @@ from stable_baselines3.common.utils import set_random_seed
 # ==================== 1. 설정 (Config) ====================
 class Config:
     env_name = "Walker2d-v5"
-    total_timesteps = 3_000_000
+    total_timesteps = 3_500_000
     
     # 병렬 처리 설정
     n_envs = 8
